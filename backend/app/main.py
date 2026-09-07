@@ -1,12 +1,12 @@
-import logging
-
 from app.api.health import router as health_router
+from app.Auth.auth import router as auth_router
 from app.core.config import settings
+from app.database.database import base, engine
+from app.models import models
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+base.metadata.create_all(bind=engine)
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
@@ -20,3 +20,4 @@ if settings.BACKEND_CORS_ORIGINS:
     )
 
 app.include_router(health_router)
+app.include_router(auth_router)
