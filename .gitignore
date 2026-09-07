@@ -1,0 +1,42 @@
+# ========================
+# Environment & Secrets (Crucial)
+# ========================
+*.env
+.env
+.env.*
+!.env.example
+
+# ========================
+# Backend (Python / FastAPI)
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.sqlite3
+
+# ========================
+# Frontend (Node / React / Vite)
+# ========================
+node_modules/
+dist/
+build/
+.npm/
+*.log
+
+# ========================
+# System & Editors
+# ========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ========================
+# Databases
+# ========================
+*.db
+*.sqlite
+*.sqlite3
