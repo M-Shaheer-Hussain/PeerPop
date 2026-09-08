@@ -3,6 +3,7 @@ import RegisterDevice from "../DeviceRegisteration/DeviceRegisteration";
 import { Link, Outlet } from "react-router-dom";
 import { useContext } from "react";
 import { AuthContext } from "../Context/AuthContext";
+import PeerDiscovery from "../PeerDiscovery/PeerDiscovery";
 
 function Layout() {
     const { user } = useContext(AuthContext);
@@ -33,6 +34,7 @@ function Layout() {
                 ) : (
                     <>
                         <RegisterDevice />
+                        <PeerDiscovery/>
                         <Outlet />
                     </>
                 )}

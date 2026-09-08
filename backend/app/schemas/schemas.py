@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,3 +29,20 @@ class DeviceCreate(BaseModel):
 
 class DeviceNameUpdate(BaseModel):
     device_name: str = Field(..., min_length=1, max_length=50)
+
+class DiscoveryPayload(BaseModel):
+    device_id: str
+    device_name: str
+    public_key: str
+    port: int = 8000
+    version: str = "1.0"
+
+class DiscoveredDevice(BaseModel):
+    device_id: str
+    device_name: str
+    public_key: str
+    ip_address: str
+    last_seen: float
+    status: str = "Available"
+
+    
