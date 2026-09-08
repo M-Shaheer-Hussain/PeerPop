@@ -1,4 +1,5 @@
 import StatusChecker from "../StatusChecker/StatusChecker";
+import RegisterDevice from "../DeviceRegisteration/DeviceRegisteration";
 import { Link, Outlet } from "react-router-dom";
 import { useContext } from "react";
 import { AuthContext } from "../Context/AuthContext";
@@ -10,6 +11,7 @@ function Layout() {
         <div className="Global-layout">
             <nav style={{ display: "flex", gap: "10px", padding: "10px" }}>
                 <Link to="/">Home</Link>
+
                 {!user ? (
                     <>
                         <Link to="/login">Login</Link>
@@ -22,11 +24,21 @@ function Layout() {
                     </>
                 )}
             </nav>
+
             <StatusChecker />
+
             <main style={{ padding: "20px" }}>
-                <Outlet />
+                {!user ? (
+                    <Outlet />
+                ) : (
+                    <>
+                        <RegisterDevice />
+                        <Outlet />
+                    </>
+                )}
             </main>
         </div>
     );
 }
+
 export default Layout;

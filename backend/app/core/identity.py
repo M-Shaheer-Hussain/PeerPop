@@ -12,8 +12,7 @@ def initialize_device_identity():
     try:
         # Check Device Identity: Exists?
         if os.path.exists(PRIVATE_KEY_PATH):
-            # Load Identity & Return (Device Ready)
-            return db.query(Device).first()
+            return db.query(Device).filter(Device.is_local == True).first()
 
         # Missing? Generate Key Pair
         private_key = ed25519.Ed25519PrivateKey.generate()
@@ -32,22 +31,25 @@ def initialize_device_identity():
         if os.name == 'posix':
             os.chmod(PRIVATE_KEY_PATH, 0o600)
 
-        # Store Identity (Database)
+        # Serialize Public Key
         public_bytes = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode('utf-8')
         
-        # 'id' is generated automatically by the UUID model update
+        # --- THE FIX: Purge old orphaned local identities before inserting the new one ---
+        db.query(Device).filter(Device.is_local == True).delete()
+        
+        # Create and store the brand new local identity
         new_device = Device(
             device_name="Local-Node",
-            public_key=public_bytes
+            public_key=public_bytes,
+            is_local=True
         )
         db.add(new_device)
         db.commit()
         db.refresh(new_device)
         
-        # Device Ready
         return new_device
         
     finally:
