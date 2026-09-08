@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from app.database.database import base
@@ -12,3 +13,13 @@ class User(base):
     password_hashed: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
     is_active: Mapped[bool] = mapped_column(default=True)
+
+class Device(base):
+    __tablename__="devices"
+
+    # Added UUID default to prevent IntegrityError on missing primary key[cite: 5]
+    id: Mapped[str] = mapped_column(primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    device_name: Mapped[str] = mapped_column(nullable=False)
+    public_key: Mapped[str] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    lastseen: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))

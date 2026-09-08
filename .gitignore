@@ -40,3 +40,5 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+.local_drop_key.pem

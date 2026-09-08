@@ -14,5 +14,17 @@ class UserResponse(BaseModel):
     is_active: bool
     
     # By default Pydantic model returns dictionaries but when this will be used
-    # in CRUDS we returns BaseModel causing an error
+    # in CRUDS we returns BaseModel causing an error[cite: 6]
     model_config = ConfigDict(from_attributes=True)
+
+class DeviceResponse(BaseModel):
+    device_name: str
+    public_key: str
+    model_config = ConfigDict(from_attributes=True)
+
+class DeviceCreate(BaseModel):
+    device_name: str
+    public_key: str  # Added this field so the endpoint can satisfy the database requirement[cite: 5, 6]
+
+class DeviceNameUpdate(BaseModel):
+    device_name: str = Field(..., min_length=1, max_length=50)
