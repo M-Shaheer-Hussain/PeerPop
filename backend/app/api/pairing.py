@@ -31,13 +31,13 @@ router = APIRouter(prefix="/pairing", tags=["Pairing"])
 
 @router.post("/request", response_model=PairingResponse)
 def receive_pairing_request(req: PairingRequest, db: Session = Depends(get_db)):
-    # 1. Identity Pinning Check
-    existing = db.query(TrustedDevice).filter(TrustedDevice.remote_device_id == req.device_id).first()
-    if existing:
+    # 1. Identity Pinning Check (Global across all users on this machine)
+    existing_records = db.query(TrustedDevice).filter(TrustedDevice.remote_device_id == req.device_id).all()
+    for existing in existing_records:
         if existing.remote_public_key != req.public_key:
             raise HTTPException(status_code=400, detail="Identity mismatch! Public key changed.")
-        if existing.status == "TRUSTED":
-            raise HTTPException(status_code=400, detail="Device is already trusted.")
+            
+    # REMOVED the "Device is already trusted" block here.
 
     # 2. Generate Challenge
     session_id = str(uuid.uuid4())
@@ -55,6 +55,8 @@ def receive_pairing_request(req: PairingRequest, db: Session = Depends(get_db)):
         "created_at": time.time()
     }
     return {"session_id": session_id, "nonce": nonce, "code": code}
+
+
 
 @router.post("/verify")
 def verify_pairing_signature(req: PairingVerify):
@@ -86,25 +88,33 @@ def check_pending_requests():
     ]
 
 @router.post("/approve/{session_id}")
-def human_approve_pairing(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def human_approve_pairing(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):  # noqa: B008
     """User clicked 'Accept' on Device B."""
     session = active_pairing_sessions.get(session_id)
     if not session or session["status"] != "PENDING_HUMAN_APPROVAL":
         raise HTTPException(status_code=400, detail="Invalid or expired session")
 
-    # Establish persistent trust
-    new_trust = TrustedDevice(
-        owner_id=current_user.id,
-        remote_device_id=session["device_id"],
-        remote_public_key=session["public_key"],
-        device_name=session["device_name"],
-        status="TRUSTED"
-    )
-    db.add(new_trust)
-    db.commit()
+    # Check if THIS specific user already trusts the device
+    existing = db.query(TrustedDevice).filter(
+        TrustedDevice.owner_id == current_user.id,
+        TrustedDevice.remote_device_id == session["device_id"]
+    ).first()
+
+    if not existing:
+        new_trust = TrustedDevice(
+            owner_id=current_user.id,
+            remote_device_id=session["device_id"],
+            remote_public_key=session["public_key"],
+            device_name=session["device_name"],
+            status="TRUSTED"
+        )
+        db.add(new_trust)
+        db.commit()
     
-    session["status"] = "TRUSTED"  # Keep in memory briefly so Device A can see it was approved
+    session["status"] = "TRUSTED" 
     return {"message": "Trust established"}
+
+
 
 @router.get("/status/{session_id}")
 def check_session_status(session_id: str):
@@ -119,7 +129,7 @@ def check_session_status(session_id: str):
 # ==========================================
 
 @router.post("/initiate")
-def initiate_pairing(target: InitiatePairing, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def initiate_pairing(target: InitiatePairing, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):  # noqa: B008
     local_device = db.query(Device).filter(Device.is_local == True).first()
     if not local_device:
         raise HTTPException(status_code=500, detail="Local device identity not initialized.")
@@ -174,9 +184,8 @@ def initiate_pairing(target: InitiatePairing, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=500, detail="Target device is unreachable.")
 
 
-
 @router.get("/status/outbound/{session_id}")
-def check_outbound_status(session_id: str, db: Session = Depends(get_db)):
+def check_outbound_status(session_id: str, db: Session = Depends(get_db)):  # noqa: B008
     """Device A uses this to ask Device B if the human clicked Accept."""
     outbound = active_outbound_sessions.get(session_id)
     if not outbound:
@@ -185,13 +194,16 @@ def check_outbound_status(session_id: str, db: Session = Depends(get_db)):
     target_url = f"http://{outbound['target_ip']}:{outbound['target_port']}/pairing"
     
     try:
-        # Ask Device B for the status
         res = requests.get(f"{target_url}/status/{session_id}", timeout=5)
         remote_status = res.json().get("status", "REJECTED_OR_EXPIRED")
         
         if remote_status == "TRUSTED":
-            # Device B accepted! Save Device B's identity to Device A's database
-            existing = db.query(TrustedDevice).filter(TrustedDevice.remote_device_id == outbound["target_device_id"]).first()
+            # Check if THIS specific user already trusts the target
+            existing = db.query(TrustedDevice).filter(
+                TrustedDevice.owner_id == outbound["owner_id"],
+                TrustedDevice.remote_device_id == outbound["target_device_id"]
+            ).first()
+            
             if not existing:
                 new_trust = TrustedDevice(
                     owner_id=outbound["owner_id"],
@@ -212,11 +224,12 @@ def check_outbound_status(session_id: str, db: Session = Depends(get_db)):
         return {"status": remote_status}
         
     except requests.exceptions.RequestException:
-        # Keep waiting if there is a minor network hiccup
         return {"status": "PENDING_HUMAN_APPROVAL"}
 
+
+
 @router.get("/trusted")
-def get_trusted_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_trusted_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):  # noqa: B008
     """Returns all trusted devices, auto-syncing their latest names if they are currently online."""
     trusted_records = db.query(TrustedDevice).filter(
         TrustedDevice.owner_id == current_user.id, 
