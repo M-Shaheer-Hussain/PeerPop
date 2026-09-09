@@ -42,7 +42,24 @@ class DiscoveredDevice(BaseModel):
     device_name: str
     public_key: str
     ip_address: str
+    port: int              # Added so Phase 5 knows where to send HTTP requests
     last_seen: float
     status: str = "Available"
 
-    
+class PairingRequest(BaseModel):
+    device_id: str
+    device_name: str
+    public_key: str
+
+class PairingResponse(BaseModel):
+    session_id: str
+    nonce: str
+    code: str
+
+class PairingVerify(BaseModel):
+    session_id: str
+    signature: str
+
+class InitiatePairing(BaseModel):
+    target_ip: str
+    target_port: int

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.api.device import router as device_router
 from app.api.health import router as health_router
 from app.api.network import router as network_router
+from app.api.pairing import router as pairing_router
 from app.Auth.auth import router as auth_router
 from app.core.config import settings
 from app.core.discovery import (
@@ -41,7 +42,8 @@ async def lifespan(app: FastAPI):
         )
         
         # 2. Start the Broadcaster & Cleanup tasks
-        broadcast_task = asyncio.create_task(udp_broadcaster(local_device, 8000))
+
+        broadcast_task = asyncio.create_task(udp_broadcaster(local_device, settings.API_PORT))
         cleanup_task = asyncio.create_task(cleanup_stale_peers())
     else:
         logger.warning("Device identity file exists, but database record is missing.")
@@ -69,3 +71,4 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(device_router)
 app.include_router(network_router)
+app.include_router(pairing_router)

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "default-secret-key"
     ALGORITHM: str = "HS256"
 
+    API_PORT:int=8000
     DISCOVERY_PORT: int = 54321
     DISCOVERY_INTERVAL: int = 3  # Seconds between broadcasts
 

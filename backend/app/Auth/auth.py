@@ -1,4 +1,5 @@
 import jwt
+from app.core import discovery
 from app.core.config import settings
 from app.database.database import get_db
 from app.models.models import User
@@ -48,12 +49,17 @@ def login(user_data: UserCreate, response: Response, db: Session = Depends(get_d
         secure=False,      
         max_age=86400  #24hours in seconds
     )
+
+    # Toggle discovery ON when user successfully logs in
+    discovery.is_discoverable = True
     
     return {"message": "Successfully logged in"}
 
 @router.post("/logout")
 def logout(response: Response):
     response.delete_cookie("access_token", httponly=True, samesite="lax")
+    # Toggle discovery OFF when user logs out
+    discovery.is_discoverable = False
     return {"message": "Successfully logged out"}
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):  # noqa: B008
@@ -77,4 +83,5 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):  # noqa: 
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):  # noqa: B008
+    discovery.is_discoverable = True
     return current_user

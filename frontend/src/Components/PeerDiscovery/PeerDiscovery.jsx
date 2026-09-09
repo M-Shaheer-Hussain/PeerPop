@@ -40,10 +40,18 @@ function PeerDiscovery() {
 
             <div>
                 {availDevices.map((device) => (
+                    // ... (inside your mapping)
                     <div key={device.device_id}>
-                        <strong>{device.device_name}</strong>
-                        <p>ID: {device.device_id.substring(0, 12)}...</p>
-                        <p>🟢 {device.status}</p>
+                    <strong>{device.device_name}</strong>
+                    <p>ID: {device.device_id.substring(0, 12)}...</p>
+    
+                    {/* Dynamically change color and emoji based on status */}
+                    <p style={{ 
+                        color: device.status === "Available" ? "green" : "gray",
+                        fontWeight: "bold"
+                    }}>
+                        {device.status === "Available" ? "🟢" : "⚪"} {device.status}
+                    </p>
                     </div>
                 ))}
             </div>

@@ -26,3 +26,15 @@ class Device(base):
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
     lastseen: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
     is_local: Mapped[bool] = mapped_column(default=False)
+
+
+class TrustedDevice(base):
+    __tablename__ = "trusted_devices"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    remote_device_id: Mapped[str] = mapped_column(index=True)
+    remote_public_key: Mapped[str] = mapped_column(nullable=False)
+    device_name: Mapped[str] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(default="TRUSTED")  # TRUSTED or REVOKED
+    paired_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
