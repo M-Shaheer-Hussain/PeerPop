@@ -1,4 +1,4 @@
-import asyncio
+
 from app.core.discovery import nearby_devices
 from app.p2p.handler import connect_to_peer
 from app.schemas.schemas import DiscoveredDevice

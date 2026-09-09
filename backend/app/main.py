@@ -8,6 +8,7 @@ from app.api.device import router as device_router
 from app.api.health import router as health_router
 from app.api.network import router as network_router
 from app.api.pairing import router as pairing_router
+from app.api.transfer import router as transfer_router
 from app.Auth.auth import router as auth_router
 from app.core.config import settings
 from app.core.discovery import (
@@ -101,3 +102,4 @@ app.include_router(auth_router)
 app.include_router(device_router)
 app.include_router(network_router)
 app.include_router(pairing_router)
+app.include_router(transfer_router)

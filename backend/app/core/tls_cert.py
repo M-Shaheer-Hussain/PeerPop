@@ -1,11 +1,12 @@
 import datetime
-import tempfile
 import os
+import tempfile
+from typing import cast
+
 from cryptography import x509
-from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from typing import cast
+from cryptography.x509.oid import NameOID
 
 # Path to your existing Ed25519 key
 KEY_PATH = ".local_drop_key.pem"
@@ -29,7 +30,7 @@ def generate_tls_certificates():
 
     # 2. Build the X.509 Certificate
     subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, u"LocalDrop-Peer")
+        x509.NameAttribute(NameOID.COMMON_NAME, u"LocalDrop-Peer")  # noqa: UP025
     ])
     
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -57,8 +58,8 @@ def generate_tls_certificates():
     )
 
     # 4. Write to temporary files (Python's SSL context requires file paths)
-    cert_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
-    key_file = tempfile.NamedTemporaryFile(delete=False, suffix=".key")
+    cert_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")  # noqa: SIM115
+    key_file = tempfile.NamedTemporaryFile(delete=False, suffix=".key")  # noqa: SIM115
     
     cert_file.write(cert_pem)
     key_file.write(key_pem)
