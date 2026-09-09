@@ -2,22 +2,31 @@ import { useState, useEffect } from "react";
 
 function PeerDiscovery() {
     const [availDevices, setAvailDevices] = useState([]);
+    const [trustedDevices, setTrustedDevices] = useState([]);
     const [error, setError] = useState(null);
     const [outgoingSession, setOutgoingSession] = useState(null);
 
     const fetchDetails = async () => {
         try {
-            const response = await fetch("http://localhost:8000/network/nearby");
-            if (response.ok) {
-                const data = await response.json();
-                setAvailDevices(data);
-                setError(null); 
-                return;
+            const resNearby = await fetch("http://localhost:8000/network/nearby");
+            const resTrusted = await fetch("http://localhost:8000/pairing/trusted", {
+                credentials: "include" 
+            });
+
+            if (resNearby.ok && resTrusted.ok) {
+                const nearbyData = await resNearby.json();
+                const trustedData = await resTrusted.json();
+                
+                setTrustedDevices(trustedData);
+                
+                const trustedIds = new Set(trustedData.map(d => d.device_id));
+                const untrustedNearby = nearbyData.filter(d => !trustedIds.has(d.device_id));
+                
+                setAvailDevices(untrustedNearby);
+                setError(null);
             }
-            const errData = await response.json();
-            setError(`Device Loading Failed: ${errData.detail || "Unknown Error"}`);
         } catch (error) {
-            setError("Available Devices could not be fetched. Is the server running?");
+            setError("Network error fetching devices.");
         }
     };
 
@@ -57,14 +66,14 @@ function PeerDiscovery() {
             const res = await fetch("http://localhost:8000/pairing/initiate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                credentials: "include", 
+                credentials: "include",
                 body: JSON.stringify({
-                target_ip: device.ip_address,
-                target_port: device.port,
-                target_device_id: device.device_id,
-                target_device_name: device.device_name,
-                target_public_key: device.public_key
-            })
+                    target_ip: device.ip_address,
+                    target_port: device.port,
+                    target_device_id: device.device_id,
+                    target_device_name: device.device_name,
+                    target_public_key: device.public_key
+                })
             });
 
             if (res.ok) {
@@ -89,12 +98,26 @@ function PeerDiscovery() {
                 </div>
             )}
 
-            <h2>Nearby Devices</h2>
-            
             {error && <p>{error}</p>}
-            
+
+            <h2>My Trusted Devices</h2>
+            <div>
+                {trustedDevices.filter(d => d.status === "Available").length === 0 && (
+                    <p>No trusted devices are currently online.</p>
+                )}
+                
+                {trustedDevices.filter(d => d.status === "Available").map((device) => (
+                    <div key={device.device_id}>
+                        <strong>{device.device_name}</strong>
+                        <p>ID: {device.device_id.substring(0, 12)}...</p>
+                        <p>✅ <strong>Trusted & Connected</strong></p>
+                    </div>
+                ))}
+            </div>
+
+            <h2>Available to Pair</h2>
             {availDevices.length === 0 && !error && (
-                <p>Scanning for nearby devices...</p>
+                <p>Scanning for new devices...</p>
             )}
 
             <div>

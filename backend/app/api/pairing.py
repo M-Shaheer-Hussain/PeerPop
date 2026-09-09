@@ -3,6 +3,7 @@ import uuid
 
 import requests
 from app.Auth.auth import get_current_user
+from app.core.discovery import nearby_devices
 from app.core.pairing import (
     active_outbound_sessions,
     active_pairing_sessions,
@@ -213,3 +214,44 @@ def check_outbound_status(session_id: str, db: Session = Depends(get_db)):
     except requests.exceptions.RequestException:
         # Keep waiting if there is a minor network hiccup
         return {"status": "PENDING_HUMAN_APPROVAL"}
+
+@router.get("/trusted")
+def get_trusted_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Returns all trusted devices, auto-syncing their latest names if they are currently online."""
+    trusted_records = db.query(TrustedDevice).filter(
+        TrustedDevice.owner_id == current_user.id, 
+        TrustedDevice.status == "TRUSTED"
+    ).all()
+    
+    results = []
+    db_needs_commit = False
+    
+    for record in trusted_records:
+        live_data = nearby_devices.get(record.remote_device_id)
+        
+        # If the device is currently active on the UDP radar
+        if live_data and live_data["status"] == "Available":
+            # Lazy Sync: Update the database if they changed their name
+            if record.device_name != live_data["device_name"]:
+                record.device_name = live_data["device_name"]
+                db_needs_commit = True
+                
+            results.append({
+                "device_id": record.remote_device_id,
+                "device_name": record.device_name,
+                "status": "Available",
+                "ip_address": live_data["ip_address"],
+                "port": live_data["port"]
+            })
+        else:
+            # Device is trusted, but currently offline
+            results.append({
+                "device_id": record.remote_device_id,
+                "device_name": record.device_name,
+                "status": "Offline"
+            })
+            
+    if db_needs_commit:
+        db.commit()
+        
+    return results
