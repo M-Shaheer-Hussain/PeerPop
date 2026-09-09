@@ -1,77 +1,153 @@
-"""
-Phase 7 — Basic file transfer state & helpers.
-
-This module is purely additive: it introduces the in-memory registries and
-small utility functions needed to support file-selection -> transfer request
--> receiver approval -> streaming -> save-to-disk, without touching any of
-the existing pairing / discovery / auth code paths.
-"""
-import logging
 import os
 import time
-import uuid
 
-logger = logging.getLogger(__name__)
+from app.Auth.auth import get_current_user
+from app.core.discovery import nearby_devices
+from app.core.transfer import (
+    UPLOADS_STAGING_DIR,
+    new_transfer_id,
+    outbound_transfer_status,
+    pending_incoming_transfers,
+    safe_filename,
+)
+from app.models.models import User
+from app.p2p.handler import send_file_over_p2p
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
 
-# Where incoming files are written to on this device.
-DOWNLOADS_DIR = os.path.join(os.getcwd(), "downloads")
-os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+router = APIRouter(prefix="/transfer", tags=["Transfer"])
 
-# Where outbound files are temporarily staged after upload, before being
-# streamed out over the secure P2P channel.
-UPLOADS_STAGING_DIR = os.path.join(os.getcwd(), "uploads_staging")
-os.makedirs(UPLOADS_STAGING_DIR, exist_ok=True)
+# ==========================================
+# SENDER (DEVICE A) ENDPOINTS
+# ==========================================
 
-CHUNK_SIZE = 64 * 1024  # 64 KB streaming chunks
+@router.post("/send")
+async def send_file(
+    background_tasks: BackgroundTasks,
+    device_id: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),  # noqa: B008
+):
+    """Phase 7: File selection + transfer request kickoff.
 
-# ------------------------------------------------------------------
-# Registries (all in-memory, mirroring the style of app.core.pairing)
-# ------------------------------------------------------------------
+    Stages the uploaded file, looks up the target peer on the local network
+    radar, and starts the request/approval/streaming sequence in the
+    background so the caller isn't blocked waiting on human approval.
+    """
+    peer = nearby_devices.get(device_id)
+    if not peer or peer.get("status") != "Available":
+        raise HTTPException(status_code=404, detail="Peer not found or currently offline.")
 
-# Receiver side: transfer_id -> {
-#   "transfer_id", "filename", "size", "sender_device_id",
-#   "sender_device_name", "status", "websocket", "created_at"
-# }
-# status: PENDING -> ACCEPTED/REJECTED -> RECEIVING -> COMPLETED/FAILED
-pending_incoming_transfers = {}
+    transfer_id = new_transfer_id()
+    filename = safe_filename(file.filename or "unnamed_file")
+    staged_path = os.path.join(UPLOADS_STAGING_DIR, f"{transfer_id}_{filename}")
 
-# Receiver side: transfer_id -> {"handle": file_obj, "path": str, "received": int, "size": int}
-# Populated when the sender signals TRANSFER_START, cleared on TRANSFER_END.
-active_incoming_files = {}
+    contents = await file.read()
+    with open(staged_path, "wb") as f:
+        f.write(contents)
+    size = len(contents)
 
-# Sender side: transfer_id -> {
-#   "status", "filename", "size", "target_device_id", "target_device_name",
-#   "file_path", "error", "created_at"
-# }
-# status: PENDING_APPROVAL -> ACCEPTED/REJECTED -> SENDING -> COMPLETED/FAILED
-outbound_transfer_status = {}
+    outbound_transfer_status[transfer_id] = {
+        "status": "PENDING_APPROVAL",
+        "filename": filename,
+        "size": size,
+        "target_device_id": device_id,
+        "target_device_name": peer.get("device_name", "Unknown Device"),
+        "file_path": staged_path,
+        "error": None,
+        "created_at": time.time(),
+    }
+
+    transfer_payload = {
+        "transfer_id": transfer_id,
+        "file_path": staged_path,
+        "filename": filename,
+        "size": size,
+    }
+
+    background_tasks.add_task(
+        send_file_over_p2p,
+        peer["ip_address"],
+        peer.get("p2p_port", 8765),
+        device_id,
+        transfer_payload,
+    )
+
+    return {"transfer_id": transfer_id, "status": "PENDING_APPROVAL"}
 
 
-def new_transfer_id() -> str:
-    return str(uuid.uuid4())
+@router.get("/status/{transfer_id}")
+def get_outbound_status(transfer_id: str):
+    """Device A polls this to track approval + streaming progress."""
+    status = outbound_transfer_status.get(transfer_id)
+    if not status:
+        return {"status": "UNKNOWN"}
+    return {
+        "status": status["status"],
+        "filename": status["filename"],
+        "size": status["size"],
+        "error": status.get("error"),
+    }
 
 
-def safe_filename(name: str | None) -> str:
-    """Strips any directory components to prevent path traversal."""
-    cleaned = os.path.basename(name or "").strip()
-    cleaned = cleaned.replace("..", "_")
-    return cleaned or f"received_file_{int(time.time())}"
+# ==========================================
+# RECEIVER (DEVICE B) ENDPOINTS
+# ==========================================
 
-
-def cleanup_stale_transfers(max_age_seconds: int = 300):
-    """Drops transfer bookkeeping entries that never got resolved."""
-    now = time.time()
-
-    stale_incoming = [
+@router.get("/incoming")
+def check_incoming_transfers():
+    """Frontend polls this to see if someone wants to send a file."""
+    current_time = time.time()
+    expired = [
         tid for tid, data in pending_incoming_transfers.items()
-        if data["status"] == "PENDING" and now - data["created_at"] > max_age_seconds
+        if data["status"] == "PENDING" and current_time - data["created_at"] > 120
     ]
-    for tid in stale_incoming:
+    for tid in expired:
         del pending_incoming_transfers[tid]
 
-    stale_outbound = [
-        tid for tid, data in outbound_transfer_status.items()
-        if data["status"] in ("COMPLETED", "REJECTED", "FAILED") and now - data["created_at"] > max_age_seconds
+    return [
+        {
+            "transfer_id": tid,
+            "filename": data["filename"],
+            "size": data["size"],
+            "sender_device_name": data["sender_device_name"],
+        }
+        for tid, data in pending_incoming_transfers.items()
+        if data["status"] == "PENDING"
     ]
-    for tid in stale_outbound:
-        del outbound_transfer_status[tid]
+
+
+@router.post("/approve/{transfer_id}")
+async def approve_transfer(transfer_id: str, current_user: User = Depends(get_current_user)):  # noqa: B008
+    """User clicked 'Accept' on the incoming file transfer request."""
+    record = pending_incoming_transfers.get(transfer_id)
+    if not record or record["status"] != "PENDING":
+        raise HTTPException(status_code=400, detail="Invalid or expired transfer request")
+
+    websocket = record["websocket"]
+    await websocket.send(f"TRANSFER_ACCEPT:{transfer_id}")
+    record["status"] = "ACCEPTED"
+
+    return {"message": "Transfer accepted. Receiving will begin shortly."}
+
+
+@router.post("/reject/{transfer_id}")
+async def reject_transfer(transfer_id: str, current_user: User = Depends(get_current_user)):  # noqa: B008
+    """User clicked 'Reject' on the incoming file transfer request."""
+    record = pending_incoming_transfers.get(transfer_id)
+    if not record or record["status"] != "PENDING":
+        raise HTTPException(status_code=400, detail="Invalid or expired transfer request")
+
+    websocket = record["websocket"]
+    await websocket.send(f"TRANSFER_REJECT:{transfer_id}")
+    record["status"] = "REJECTED"
+    del pending_incoming_transfers[transfer_id]
+
+    return {"message": "Transfer rejected."}
