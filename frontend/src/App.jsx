@@ -6,13 +6,16 @@ import Logout from "./Components/Logout/Logout";
 import RegisterDevice from "./Components/DeviceRegisteration/DeviceRegisteration";
 import { AuthProvider } from "./Components/Context/AuthContext";
 
+// Import the new Dashboard component
+import Dashboard from "./Components/Dashboard/Dashboard"; // Adjust path as needed
+
 function App() {
   return (
     <AuthProvider>
         <BR>
             <Routes>
                 <Route path="/" element={<Layout />}>
-                    <Route index element={<h2>L-Share</h2>} />
+                    <Route index element={<Dashboard />} />
                     <Route path="login" element={<Login />} />
                     <Route path="register" element={<Register />} />
                     <Route path="logout" element={<Logout />} />
