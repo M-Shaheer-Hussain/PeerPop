@@ -4,6 +4,7 @@ import uuid
 import requests
 from app.Auth.auth import get_current_user
 from app.core.pairing import (
+    active_outbound_sessions,
     active_pairing_sessions,
     generate_nonce,
     generate_pairing_code,
@@ -118,39 +119,83 @@ def check_session_status(session_id: str):
 
 @router.post("/initiate")
 def initiate_pairing(target: InitiatePairing, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Device A's frontend triggers this to start the pairing process with Device B."""
     local_device = db.query(Device).filter(Device.is_local == True).first()
-    target_url = f"http://{target.target_ip}:{target.target_port}/pairing"
-
-    # ADD THIS NULL CHECK to satisfy Pylance
     if not local_device:
         raise HTTPException(status_code=500, detail="Local device identity not initialized.")
-    
+
+    target_url = f"http://{target.target_ip}:{target.target_port}/pairing"
+
     try:
-        # 1. Ask B for a challenge
+        # 1. Ask B for challenge
         payload = {
             "device_id": str(local_device.id),
-            "device_name": local_device.device_name,
-            "public_key": local_device.public_key
+            "device_name": str(local_device.device_name),
+            "public_key": str(local_device.public_key)
         }
         res = requests.post(f"{target_url}/request", json=payload, timeout=5)
         res.raise_for_status()
         data = res.json()
 
-        # 2. Cryptographically sign the challenge
+        # 2. Sign and Verify
         signature = sign_message(data["nonce"])
-
-        # 3. Send signature back to B
         verify_payload = {"session_id": data["session_id"], "signature": signature}
         requests.post(f"{target_url}/verify", json=verify_payload, timeout=5).raise_for_status()
+
+        # 3. NEW: Track this outbound session so Device A can poll for the result
+        active_outbound_sessions[data["session_id"]] = {
+            "target_ip": target.target_ip,
+            "target_port": target.target_port,
+            "target_device_id": target.target_device_id,
+            "target_device_name": target.target_device_name,
+            "target_public_key": target.target_public_key,
+            "owner_id": current_user.id
+        }
 
         return {
             "message": "Waiting for remote approval",
             "session_id": data["session_id"],
-            "code": data["code"],
-            "target_ip": target.target_ip,
-            "target_port": target.target_port
+            "code": data["code"]
         }
 
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Failed to communicate with target: {str(e)}")
+
+@router.get("/status/outbound/{session_id}")
+def check_outbound_status(session_id: str, db: Session = Depends(get_db)):
+    """Device A uses this to ask Device B if the human clicked Accept."""
+    outbound = active_outbound_sessions.get(session_id)
+    if not outbound:
+        return {"status": "REJECTED_OR_EXPIRED"}
+    
+    target_url = f"http://{outbound['target_ip']}:{outbound['target_port']}/pairing"
+    
+    try:
+        # Ask Device B for the status
+        res = requests.get(f"{target_url}/status/{session_id}", timeout=5)
+        remote_status = res.json().get("status", "REJECTED_OR_EXPIRED")
+        
+        if remote_status == "TRUSTED":
+            # Device B accepted! Save Device B's identity to Device A's database
+            existing = db.query(TrustedDevice).filter(TrustedDevice.remote_device_id == outbound["target_device_id"]).first()
+            if not existing:
+                new_trust = TrustedDevice(
+                    owner_id=outbound["owner_id"],
+                    remote_device_id=outbound["target_device_id"],
+                    remote_public_key=outbound["target_public_key"],
+                    device_name=outbound["target_device_name"],
+                    status="TRUSTED"
+                )
+                db.add(new_trust)
+                db.commit()
+                
+            del active_outbound_sessions[session_id]
+            return {"status": "TRUSTED"}
+            
+        elif remote_status == "REJECTED_OR_EXPIRED":
+            del active_outbound_sessions[session_id]
+            
+        return {"status": remote_status}
+        
+    except requests.exceptions.RequestException:
+        # Keep waiting if there is a minor network hiccup
+        return {"status": "PENDING_HUMAN_APPROVAL"}

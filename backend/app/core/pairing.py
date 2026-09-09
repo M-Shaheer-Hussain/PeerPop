@@ -7,6 +7,9 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 # In-memory dictionary to hold short-lived pairing sessions
 active_pairing_sessions = {}
 
+# Add this right below active_pairing_sessions
+active_outbound_sessions = {}
+
 def generate_nonce() -> str:
     """Generates a random cryptographic challenge."""
     return secrets.token_hex(16)

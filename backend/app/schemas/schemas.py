@@ -63,3 +63,6 @@ class PairingVerify(BaseModel):
 class InitiatePairing(BaseModel):
     target_ip: str
     target_port: int
+    target_device_id: str
+    target_device_name: str
+    target_public_key: str

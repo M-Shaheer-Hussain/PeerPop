@@ -32,7 +32,7 @@ function PeerDiscovery() {
 
         const checkStatus = async () => {
             try {
-                const res = await fetch(`http://localhost:8000/pairing/status/${outgoingSession.session_id}`);
+                const res = await fetch(`http://localhost:8000/pairing/status/outbound/${outgoingSession.session_id}`);
                 if (res.ok) {
                     const data = await res.json();
                     if (data.status === "TRUSTED") {
@@ -59,9 +59,12 @@ function PeerDiscovery() {
                 headers: { "Content-Type": "application/json" },
                 credentials: "include", 
                 body: JSON.stringify({
-                    target_ip: device.ip_address,
-                    target_port: device.port
-                })
+                target_ip: device.ip_address,
+                target_port: device.port,
+                target_device_id: device.device_id,
+                target_device_name: device.device_name,
+                target_public_key: device.public_key
+            })
             });
 
             if (res.ok) {
