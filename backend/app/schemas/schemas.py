@@ -36,6 +36,7 @@ class DiscoveryPayload(BaseModel):
     public_key: str
     port: int = 8000
     version: str = "1.0"
+    p2p_port: int = 8765  # NEW: We set a default of 8765 just in case
 
 class DiscoveredDevice(BaseModel):
     device_id: str
