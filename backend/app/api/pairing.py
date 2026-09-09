@@ -126,22 +126,33 @@ def initiate_pairing(target: InitiatePairing, db: Session = Depends(get_db), cur
     target_url = f"http://{target.target_ip}:{target.target_port}/pairing"
 
     try:
-        # 1. Ask B for challenge
+        # 1. Ask B for a challenge
         payload = {
             "device_id": str(local_device.id),
             "device_name": str(local_device.device_name),
             "public_key": str(local_device.public_key)
         }
         res = requests.post(f"{target_url}/request", json=payload, timeout=5)
-        res.raise_for_status()
+        
+        # NEW: Catch Target Rejections gracefully instead of crashing
+        if not res.ok:
+            error_detail = res.json().get("detail", "Target rejected request")
+            raise HTTPException(status_code=res.status_code, detail=error_detail)
+            
         data = res.json()
 
-        # 2. Sign and Verify
+        # 2. Cryptographically sign the challenge
         signature = sign_message(data["nonce"])
-        verify_payload = {"session_id": data["session_id"], "signature": signature}
-        requests.post(f"{target_url}/verify", json=verify_payload, timeout=5).raise_for_status()
 
-        # 3. NEW: Track this outbound session so Device A can poll for the result
+        # 3. Send signature back to B
+        verify_payload = {"session_id": data["session_id"], "signature": signature}
+        verify_res = requests.post(f"{target_url}/verify", json=verify_payload, timeout=5)
+        
+        if not verify_res.ok:
+            error_detail = verify_res.json().get("detail", "Signature verification failed")
+            raise HTTPException(status_code=verify_res.status_code, detail=error_detail)
+
+        # 4. Track this outbound session
         active_outbound_sessions[data["session_id"]] = {
             "target_ip": target.target_ip,
             "target_port": target.target_port,
@@ -157,8 +168,11 @@ def initiate_pairing(target: InitiatePairing, db: Session = Depends(get_db), cur
             "code": data["code"]
         }
 
+    # Catch actual network timeouts (e.g. device is turned off)
     except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to communicate with target: {str(e)}")
+        raise HTTPException(status_code=500, detail="Target device is unreachable.")
+
+
 
 @router.get("/status/outbound/{session_id}")
 def check_outbound_status(session_id: str, db: Session = Depends(get_db)):

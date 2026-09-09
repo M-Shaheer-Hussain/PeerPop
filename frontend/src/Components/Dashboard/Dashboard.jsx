@@ -1,5 +1,5 @@
-import PeerDiscovery from "../PeerDiscovery"; // Adjust path based on your folder structure
-import IncomingRequests from "../IncomingRequests"; // Adjust path based on your folder structure
+import PeerDiscovery from "../PeerDiscovery/PeerDiscovery"; // Adjust path based on your folder structure
+import IncomingRequests from "../IncomingRequests/IncomingRequests"; // Adjust path based on your folder structure
 
 function Dashboard() {
     return (
