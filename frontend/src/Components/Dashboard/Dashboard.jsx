@@ -1,5 +1,5 @@
 import IncomingRequests from "../IncomingRequests/IncomingRequests"; // Adjust path based on your folder structure
-import IncomingTransfers from "../IncomingTransfers/IncomingTransfers";
+import IncomingTransfers from "../IncomingTransfer/IncomingTransfer";
 import FileTransfer from "../FileTransfer/FileTransfer";
 
 function Dashboard() {

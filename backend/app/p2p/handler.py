@@ -107,6 +107,7 @@ async def handle_incoming_p2p(websocket):
             elif isinstance(message, str) and message.startswith("TRANSFER_START:"):
                 _, transfer_id = message.split(":", 1)
                 _open_incoming_file(transfer_id)
+                current_receiving_transfer_id = transfer_id
 
             elif isinstance(message, (bytes, bytearray)):
                 _write_incoming_chunk(current_receiving_transfer_id, message)
