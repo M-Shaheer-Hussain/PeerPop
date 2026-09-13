@@ -1,25 +1,21 @@
-import os
+import asyncio
+import json
 import time
 
 from app.Auth.auth import get_current_user
 from app.core.discovery import nearby_devices
-from app.core.transfer import (
-    UPLOADS_STAGING_DIR,
-    new_transfer_id,
-    outbound_transfer_status,
-    pending_incoming_transfers,
-    safe_filename,
-)
+from app.core.transfer import pending_incoming_transfers
 from app.models.models import User
-from app.p2p.handler import send_file_over_p2p
+from app.p2p.handler import (
+    active_secure_connections,
+    connect_to_peer,
+)
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
-    File,
-    Form,
     HTTPException,
-    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
 )
 
 router = APIRouter(prefix="/transfer", tags=["Transfer"])
@@ -28,73 +24,76 @@ router = APIRouter(prefix="/transfer", tags=["Transfer"])
 # SENDER (DEVICE A) ENDPOINTS
 # ==========================================
 
-@router.post("/send")
-async def send_file(
-    background_tasks: BackgroundTasks,
-    device_id: str = Form(...),
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),  # noqa: B008
-):
-    """Phase 7: File selection + transfer request kickoff.
-
-    Stages the uploaded file, looks up the target peer on the local network
-    radar, and starts the request/approval/streaming sequence in the
-    background so the caller isn't blocked waiting on human approval.
+@router.websocket("/ws/stream/{target_device_id}")
+async def direct_stream_passthrough(websocket: WebSocket, target_device_id: str):
     """
-    peer = nearby_devices.get(device_id)
+    Direct WebSocket Streaming (Bypass Staging):
+    Pipes file chunks directly from the sender's browser to the remote peer
+    over the secure Ed25519 P2P TLS tunnel, without saving to disk.
+    """
+    await websocket.accept()
+
+    peer = nearby_devices.get(target_device_id)
     if not peer or peer.get("status") != "Available":
-        raise HTTPException(status_code=404, detail="Peer not found or currently offline.")
+        await websocket.close(code=1008, reason="Peer not found or offline.")
+        return
 
-    transfer_id = new_transfer_id()
-    filename = safe_filename(file.filename or "unnamed_file")
-    staged_path = os.path.join(UPLOADS_STAGING_DIR, f"{transfer_id}_{filename}")
-
-    contents = await file.read()
-    with open(staged_path, "wb") as f:
-        f.write(contents)
-    size = len(contents)
-
-    outbound_transfer_status[transfer_id] = {
-        "status": "PENDING_APPROVAL",
-        "filename": filename,
-        "size": size,
-        "target_device_id": device_id,
-        "target_device_name": peer.get("device_name", "Unknown Device"),
-        "file_path": staged_path,
-        "error": None,
-        "created_at": time.time(),
-    }
-
-    transfer_payload = {
-        "transfer_id": transfer_id,
-        "file_path": staged_path,
-        "filename": filename,
-        "size": size,
-    }
-
-    background_tasks.add_task(
-        send_file_over_p2p,
-        peer["ip_address"],
-        peer.get("p2p_port", 8765),
-        device_id,
-        transfer_payload,
+    # 1. Establish the secure P2P tunnel first (without disk payload)
+    success = await connect_to_peer(
+        target_ip=peer["ip_address"],
+        target_p2p_port=peer.get("p2p_port", 8765),
+        target_device_id=target_device_id
     )
+    
+    if not success:
+        await websocket.close(code=1011, reason="Failed to connect to peer.")
+        return
 
-    return {"transfer_id": transfer_id, "status": "PENDING_APPROVAL"}
+    peer_ws = active_secure_connections.get(target_device_id)
 
+    # Ensure we have a valid connection object to satisfy Pylance
+    if not peer_ws:
+        await websocket.close(code=1011, reason="Secure connection lost or not established.")
+        return
 
-@router.get("/status/{transfer_id}")
-def get_outbound_status(transfer_id: str):
-    """Device A polls this to track approval + streaming progress."""
-    status = outbound_transfer_status.get(transfer_id)
-    if not status:
-        return {"status": "UNKNOWN"}
-    return {
-        "status": status["status"],
-        "filename": status["filename"],
-        "size": status["size"],
-        "error": status.get("error"),
-    }
+    try:
+        # 2. Wait for the browser to send the initial file metadata (JSON)
+        metadata = await websocket.receive_json()
+        transfer_id = metadata.get("transfer_id")
+        
+        # 3. Request transfer approval from the remote peer
+        request_frame = f"TRANSFER_REQUEST:{json.dumps(metadata)}"
+        await peer_ws.send(request_frame)
+        
+        # 4. Wait for the remote human to Accept or Reject
+        raw_reply = await asyncio.wait_for(peer_ws.recv(), timeout=120.0)
+        reply = raw_reply.decode("utf-8") if isinstance(raw_reply, bytes) else raw_reply
+            
+        if not reply.startswith("TRANSFER_ACCEPT:"):
+            await websocket.send_json({"status": "REJECTED"})
+            await websocket.close(code=1008, reason="Transfer rejected")
+            return
+            
+        # 5. Signal the browser to start piping data, and tell peer to prep file
+        await websocket.send_json({"status": "ACCEPTED"})
+        await peer_ws.send(f"TRANSFER_START:{transfer_id}")
+
+        # 6. The Passthrough Loop: Browser -> Local Backend -> Remote Peer
+        while True:
+            chunk = await websocket.receive_bytes()
+            if not chunk:
+                break  # Frontend sends an empty byte frame to signal EOF
+            await peer_ws.send(chunk)
+            
+        # 7. Complete the transfer
+        await peer_ws.send(f"TRANSFER_END:{transfer_id}")
+        await websocket.send_json({"status": "COMPLETED"})
+        
+    except WebSocketDisconnect:
+        print("[PASSTHROUGH] Browser disconnected mid-transfer.")
+    except Exception as e:  # noqa: BLE001
+        print(f"[PASSTHROUGH] Streaming error: {e}")
+        await websocket.send_json({"status": "FAILED", "error": str(e)})
 
 
 # ==========================================

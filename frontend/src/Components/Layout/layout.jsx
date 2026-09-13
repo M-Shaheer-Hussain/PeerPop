@@ -4,13 +4,14 @@ import { Link, Outlet } from "react-router-dom";
 import { useContext } from "react";
 import { AuthContext } from "../Context/AuthContext";
 import PeerDiscovery from "../PeerDiscovery/PeerDiscovery";
+import Dashboard from "../Dashboard/Dashboard";
 
 function Layout() {
     const { user } = useContext(AuthContext);
 
     return (
         <div className="Global-layout">
-            <nav style={{ display: "flex", gap: "10px", padding: "10px" }}>
+            <nav>
                 <Link to="/">Home</Link>
 
                 {!user ? (
@@ -28,11 +29,12 @@ function Layout() {
 
             <StatusChecker />
 
-            <main style={{ padding: "20px" }}>
+            <main>
                 {!user ? (
                     <Outlet />
                 ) : (
                     <>
+                        <Dashboard/>
                         <RegisterDevice />
                         <PeerDiscovery/>
                         <Outlet />
